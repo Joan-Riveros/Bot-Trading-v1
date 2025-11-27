@@ -1,0 +1,19 @@
+# --- Python General ---
+__pycache__/
+*.pyc
+
+# --- Entornos Virtuales ---
+.venv/
+venv/
+env/
+
+# --- Configuración y Secretos (¡CRÍTICO!) ---
+.env
+.DS_Store
+
+# --- Datos (Opcional pero recomendado) ---
+# Si los CSV son muy pesados o son datos privados, descomenta la siguiente línea:
+# *.csv
+# O para ignorar toda la carpeta de datasets:
+data_core/datasets/
+quant_lab/datasets/

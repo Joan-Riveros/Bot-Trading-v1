@@ -1,0 +1,14 @@
+MetaTrader5
+pandas
+pandas_ta
+numpy
+xgboost
+scikit-learn
+fastapi
+uvicorn
+websockets
+schedule
+pydantic          # Nuevo
+python-dotenv     # Nuevo
+pytz              # Nuevo
+aiofiles          # Nuevo
