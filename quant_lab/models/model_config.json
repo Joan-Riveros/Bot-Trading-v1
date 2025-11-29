@@ -1,1 +1,1 @@
-{"threshold": 0.75, "features": ["hour", "is_ny_session", "distance_to_ema50", "trend_ema200", "volatility_shock"]}
+{"threshold": 0.8, "features": ["hour", "is_ny_session", "distance_to_ema50", "trend_ema200", "volatility_shock"]}
