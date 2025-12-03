@@ -76,11 +76,12 @@ class BotManager:
                     detector = PO3Detector(df)
                     signal = detector.scan_for_signals(last_idx)
 
-                    current_price = df["close"].iloc[-1]
+                    current_price_nq = df["close"].iloc[-1]
+                    current_price_es = self.driver.get_current_price(
+                        self.driver.symbol_es
+                    )
                     if not signal:
-                        self.latest_status = (
-                            f"Escaneando... Precio: {current_price:.2f}"
-                        )
+                        self.latest_status = f"Escaneando... NQ: {current_price_nq:.2f}  |  ES: {current_price_es:.2f}"
 
                     if signal:
                         msg = f"🔎 Patrón {signal['signal_type']} detectado @ {signal['entry_price']}"
