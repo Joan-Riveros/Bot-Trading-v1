@@ -87,6 +87,14 @@ async def websocket_endpoint(websocket: WebSocket):
         print("📱 Cliente Flutter desconectado")
 
 
+# Simulacion
+@app.post("/bot/simulate")
+async def simulate():
+    if not bot.is_running:
+        asyncio.create_task(bot.simulate_winning_scenario())
+        return {"status": "simulation_started", "message": "Modo Demo Iniciado"}
+    return {"status": "error", "message": "Detén el bot antes de simular"}
+
+
 if __name__ == "__main__":
-    # Host 0.0.0.0 es obligatorio para acceso desde Emulador/Móvil
     uvicorn.run(app, host="0.0.0.0", port=8000)

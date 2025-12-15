@@ -181,3 +181,181 @@ class BotManager:
         self.stop()
         self.driver.close_all_positions()
         self.log("🚨 PÁNICO EJECUTADO: Todo cerrado.")
+
+    async def simulate_winning_scenario(self):
+        """
+        MODO DEMO:
+        1. Escanea el pasado buscando un Trade REAL con alta probabilidad (>80%).
+        2. Viaja en el tiempo a ese momento.
+        3. Reproduce la secuencia para mostrarla en la App.
+        """
+        self.stop()
+        await asyncio.sleep(1)
+
+        self.is_running = True  # Para que la app muestre "SISTEMA ACTIVO"
+        self.log("🎬 INICIANDO SIMULACIÓN DE ESCENARIO GANADOR...")
+        self.latest_status = "Modo Demo: Buscando Setup Perfecto..."
+        await asyncio.sleep(1)
+
+        # 1. Cargar el CSV histórico
+        csv_path = "data_core/datasets/SYNC_DATA_M1.csv"
+        if not os.path.exists(csv_path):
+            self.log("❌ Error Demo: No hay datos históricos.")
+            self.is_running = False
+            return
+
+        df_full = pd.read_csv(csv_path, index_col="time", parse_dates=True)
+        df_full.rename(
+            columns={
+                "nq_open": "open",
+                "nq_high": "high",
+                "nq_low": "low",
+                "nq_close": "close",
+                "nq_vol": "volume",
+            },
+            inplace=True,
+        )
+
+        # 2. Calcular Indicadores
+        df_full = self.indicators.add_all_features(df_full)
+        detector = PO3Detector(df_full)
+
+        # 3. Seleccionar el momento exacto del WIN (Basado en tu test anterior)
+        target_index = -1
+
+        # Empezamos desde el final hacia atrás para encontrar lo más reciente
+        total_candles = len(df_full)
+        scan_range = 10000
+        start_search = max(0, total_candles - scan_range)
+
+        print("🔍 Buscando escenario ganador en las últimas velas...")
+
+        # 4. Bucle de Reproducción
+        for i in range(total_candles - 2, start_search, -1):
+            signal = detector.scan_for_signals(i)
+            if signal:
+                # Verificar con IA
+                # Necesitamos cortar el DF para simular el pasado exacto
+                # (Pequeño truco de optimización: usamos features de la fila ya calculada para ir rápido)
+                row = df_full.iloc[i]
+                atr_val = row["ATRr_14"] if row["ATRr_14"] > 0 else 1.0
+
+                # Construcción rápida de features para testear
+                feat_hour = row.name.hour  # Simplificación para búsqueda rápida
+
+                features = pd.DataFrame(
+                    [
+                        {
+                            "hour": feat_hour,
+                            "is_ny_session": 1 if (9 <= feat_hour < 16) else 0,
+                            "distance_to_ema50": (signal["entry_price"] - row["ema_50"])
+                            / atr_val,
+                            "trend_ema200": 1
+                            if signal["entry_price"] > row["ema_200"]
+                            else 0,
+                            "volatility_shock": (row["high"] - row["low"]) / atr_val,
+                        }
+                    ]
+                )
+
+                # Preguntar a la IA
+                if self.model:
+                    try:
+                        prob = self.model.predict_proba(features)[0][1]
+                        if (
+                            prob > 0.82
+                        ):  # Buscamos una MUY BUENA (>82%) para asegurar el show
+                            target_index = i
+                            print(
+                                f"✅ ¡Encontrado! Índice {i} con probabilidad {prob:.2%}"
+                            )
+                            break
+                    except:
+                        pass
+
+        if target_index == -1:
+            self.log(
+                "⚠️ No se encontró un ejemplo perfecto (>82%) en el historial reciente."
+            )
+            self.log("💡 Sugerencia: Baja el umbral de búsqueda en el código.")
+            self.is_running = False
+            return
+
+        # 4. REPRODUCIR EL SHOW
+        # Empezamos 3 velas antes del disparo para generar contexto
+        start_replay = target_index - 3
+
+        self.log(f"⏪ Viajando al {df_full.index[target_index]}...")
+        await asyncio.sleep(2)
+
+        for i in range(start_replay, target_index + 1):
+            if not self.is_running:
+                break
+
+            current_slice = df_full.iloc[: i + 1]
+            row = current_slice.iloc[-1]
+
+            # Simular precio en vivo
+            price_nq = row["close"]
+            price_es = price_nq * 0.25  # Simulación simple del ES relativa al NQ
+            self.latest_status = f"Simulando... NQ: {price_nq:.2f} | ES: {price_es:.2f}"
+
+            # Detectar
+            det = PO3Detector(current_slice)
+            signal = det.scan_for_signals(len(current_slice) - 2)
+
+            if signal:
+                self.log(
+                    f"🔎 Patrón {signal['signal_type']} detectado @ {signal['entry_price']}"
+                )
+                await asyncio.sleep(2)
+
+                if self.model:
+                    features = self._prepare_features_for_ai(signal, current_slice)
+                    prob = self.model.predict_proba(features)[0][1]
+
+                    self.log(f"🤖 Consultando IA... Probabilidad: {prob:.2%}")
+                    await asyncio.sleep(2)
+
+                    if prob >= self.threshold:
+                        self.log(
+                            f"✅ IA APROBADO ({prob:.1%}). EJECUTANDO ORDEN SIMULADA..."
+                        )
+                        await asyncio.sleep(1)
+
+                        balance_inicial = 10000.00
+                        riesgo = 100.00
+                        ganancia = riesgo * 2.0  # 2R
+                        balance_final = balance_inicial + ganancia
+
+                        self.log(f"🎫 Orden Enviada (DEMO). Ticket: #DEMO-999")
+                        self.log(
+                            f"💰 Gestión de Riesgo: 2R (Ganancia Est: +${ganancia:.2f})"
+                        )
+
+                        self.latest_status = json.dumps(
+                            {
+                                "type": "TRADE_WIN",
+                                "data": {
+                                    "balance_before": balance_inicial,
+                                    "balance_after": balance_final,
+                                    "profit": ganancia,
+                                    "symbol": "USTEC",
+                                    "price": signal["entry_price"],
+                                    "type": signal["signal_type"],
+                                },
+                            }
+                        )
+
+                        await asyncio.sleep(5)
+                        self.latest_status = "✨ TRADE EJECUTADO (DEMO) ✨"
+
+                        break
+                    else:
+                        self.log(f"🛡 IA Rechazó ({prob:.1%}). Buscando otro...")
+
+            await asyncio.sleep(1.5)
+
+        self.is_running = False
+        self.log("🏁 Demo Finalizada.")
+        self.latest_status = "IDLE"
