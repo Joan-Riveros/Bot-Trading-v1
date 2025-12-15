@@ -27,11 +27,14 @@ class MT5Driver:
         self.risk_manager = RiskManager()
         print(f"🚜 MT5 Driver Activo | NQ: {self.symbol} | ES: {self.symbol_es}")
 
-    def get_market_data(self, timeframe=mt5.TIMEFRAME_M1, n_candles=500):
-        """Descarga velas para el NQ (Principal)"""
+    def get_market_data(self, symbol=None, timeframe=mt5.TIMEFRAME_M1, n_candles=500):
+        """Descarga velas para el NQ (Principal) o ES"""
         if not mt5.terminal_info() and not mt5.initialize():
             return None
-        rates = mt5.copy_rates_from_pos(self.symbol, timeframe, 0, n_candles)
+        
+        target_symbol = symbol if symbol else self.symbol
+        
+        rates = mt5.copy_rates_from_pos(target_symbol, timeframe, 0, n_candles)
         if rates is None or len(rates) == 0:
             return None
         df = pd.DataFrame(rates)
@@ -41,13 +44,17 @@ class MT5Driver:
             df.rename(columns={"tick_volume": "volume"}, inplace=True)
         return df
 
-    # --- NUEVO MÉTODO RÁPIDO ---
     def get_current_price(self, symbol):
         """Obtiene el precio actual (Bid) de cualquier símbolo"""
         if not mt5.terminal_info() and not mt5.initialize():
             return 0.0
         tick = mt5.symbol_info_tick(symbol)
         return tick.bid if tick else 0.0
+
+    def get_account_info(self):
+        """Devuelve objeto AccountInfo o None"""
+        if not mt5.initialize(): return None
+        return mt5.account_info()
 
     def place_limit_order(self, signal_type, entry, sl, tp, expiration_minutes=45):
         # ... (El código de órdenes se mantiene igual que antes) ...

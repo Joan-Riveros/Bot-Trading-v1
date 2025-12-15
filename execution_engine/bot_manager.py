@@ -13,6 +13,13 @@ from data_core.indicators import Indicators
 from data_core.po3_logic import PO3Detector
 from execution_engine.mt5_driver import MT5Driver
 
+try:
+    from quant_lab.features import build_features
+except ImportError:
+    # Fallback silencioso o manejo de error si no existe aún
+    print("⚠ Advertencia: Feature Engineering no encontrado. Usando modo legacy.")
+    build_features = None
+
 
 class BotManager:
     def __init__(self):
@@ -28,8 +35,36 @@ class BotManager:
         self.model = xgb.XGBClassifier()
         self.threshold = 0.70
         self.indicators = Indicators()
-
+        
+        # --- NUEVO: Estado Extendido para App ---
+        self.trade_history = []  # Lista de dicts: {price, type, profit, ...}
+        self.auto_trade = True   # Control maestro de ejecución
+        
         self._load_brain()
+
+    # --- GETTERS & SETTERS (Interfaz App) ---
+    def get_balance_equity(self):
+        """Consulta segura MT5"""
+        try:
+            acc = self.driver.get_account_info()
+            if acc:
+                return {"balance": acc.balance, "equity": acc.equity}
+        except:
+            pass
+        return {"balance": 0.0, "equity": 0.0}
+
+    def update_settings(self, risk_percent: float, auto_trade: bool):
+        """Actualiza riesgo y switch maestro"""
+        if self.driver.risk_manager:
+            self.driver.risk_manager.risk_percent = risk_percent
+        self.auto_trade = auto_trade
+        self.log(f"⚙ AJUSTES: Riesgo {risk_percent}% | AutoTrade: {auto_trade}")
+
+    def get_settings(self):
+        risk = 1.0
+        if self.driver.risk_manager:
+            risk = self.driver.risk_manager.risk_percent
+        return {"risk": risk, "auto_trade": self.auto_trade}
 
     def _load_brain(self):
         model_path = "quant_lab/models/po3_sniper_v1.json"
@@ -68,12 +103,20 @@ class BotManager:
                 df = self.driver.get_market_data(n_candles=500)
 
                 if df is not None and len(df) > 100:
-                    # 2. INDICADORES
+                    # 1.B. Obtención de datos ES (SMT Divergence)
+                    # Necesitamos calcular indicadores también para ES (Fractales)
+                    df_es = self.driver.get_market_data(symbol=self.driver.symbol_es, n_candles=500)
+                    
+                    if df_es is not None and len(df_es) > 100:
+                         df_es = self.indicators.add_all_features(df_es)
+                    
+                    # 2. INDICADORES (NQ)
                     df = self.indicators.add_all_features(df)
-
-                    # 3. LÓGICA PO3
+                    
+                    # 3. LÓGICA PO3 (Con SMT)
                     last_idx = len(df) - 2  # Vela confirmada
-                    detector = PO3Detector(df)
+                    # Pasamos df_es al detector para que valide divergencias
+                    detector = PO3Detector(df, df_correlated=df_es)
                     signal = detector.scan_for_signals(last_idx)
 
                     current_price_nq = df["close"].iloc[-1]
@@ -91,8 +134,19 @@ class BotManager:
                         # 4. INTELIGENCIA ARTIFICIAL
                         should_trade = False
 
-                        if self.model:
-                            features = self._prepare_features_for_ai(signal, df)
+                        if self.model and build_features:
+                            # Contexto de mercado para feature engineering
+                            # Usamos la fila donde ocurrió la señal (last_idx)
+                            row_signal = df.iloc[last_idx]
+                            
+                            market_ctx = {
+                                'atr': row_signal.get('ATRr_14', 1.0),
+                                'ema_50': row_signal.get('ema_50', 0.0),
+                                'ema_200': row_signal.get('ema_200', 0.0)
+                            }
+                            
+                            features = build_features(row_signal, signal['entry_price'], market_ctx)
+                            
                             try:
                                 prob = self.model.predict_proba(features)[0][1]
                                 if prob >= self.threshold:
@@ -108,10 +162,12 @@ class BotManager:
                                 self.log(f"❌ Error IA: {e}")
                                 should_trade = False
                         else:
-                            should_trade = True  # Sin IA, operamos la señal pura
+                            # Sin IA o sin módulo features, operamos la señal pura (Fallback)
+                            if not self.model: self.log("⚠ Operando sin IA (Modelo no cargado).")
+                            should_trade = True if signal['smt_divergence'] else False # Solo operamos si hay SMT confirmado
 
-                        # 5. EJECUCIÓN
-                        if should_trade:
+                        # 5. EJECUCIÓN (Respetando AutoTrade)
+                        if should_trade and self.auto_trade:
                             order = self.driver.place_limit_order(
                                 signal["signal_type"],
                                 signal["entry_price"],
@@ -121,6 +177,14 @@ class BotManager:
 
                             if order:
                                 self.log(f"🎫 Orden Ticket: {order}")
+                                # Registrar en historial (Mock inicial, lo ideal es leer desde MT5)
+                                self.trade_history.append({
+                                    "ticket": order,
+                                    "symbol": self.driver.symbol,
+                                    "type": signal["signal_type"],
+                                    "price": signal["entry_price"],
+                                    "time": str(datetime.now())
+                                })
                                 await asyncio.sleep(60)  # Cooldown
 
             except Exception as e:
@@ -132,46 +196,8 @@ class BotManager:
 
             await asyncio.sleep(5)  # Polling
 
-    def _prepare_features_for_ai(self, signal, df):
-        """Reconstruye el vector de características para la IA"""
-        idx = len(df) - 2
-        row = df.iloc[idx]
-
-        # --- FIX PARA DATETIME INDEX ---
-        # Como el driver hizo set_index('time'), el tiempo ahora es row.name
-        # NO BUSCAR row['time'] porque esa columna ya no existe.
-        timestamp = row.name
-
-        # Gestión de Timezones
-        if timestamp.tzinfo is None:
-            current_time_utc = timestamp.replace(tzinfo=pytz.utc)
-        else:
-            current_time_utc = timestamp.astimezone(pytz.utc)
-
-        current_time_ny = current_time_utc.astimezone(self.ny_tz)
-        feat_hour = current_time_ny.hour  # ENTERO, igual que en labeler.py
-
-        atr_val = row["ATRr_14"] if row["ATRr_14"] > 0 else 1.0
-        entry_price = signal["entry_price"]
-
-        # DataFrame con orden de columnas forzado para seguridad de XGBoost
-        data = {
-            "hour": feat_hour,
-            "is_ny_session": 1 if (9 <= feat_hour < 16) else 0,
-            "distance_to_ema50": (entry_price - row["ema_50"]) / atr_val,
-            "trend_ema200": 1 if entry_price > row["ema_200"] else 0,
-            "volatility_shock": (row["high"] - row["low"]) / atr_val,
-        }
-
-        # Orden explícito de columnas
-        cols_order = [
-            "hour",
-            "is_ny_session",
-            "distance_to_ema50",
-            "trend_ema200",
-            "volatility_shock",
-        ]
-        return pd.DataFrame([data])[cols_order]
+    # _prepare_features_for_ai ELIMINADO en favor de quant_lab.features.build_features
+    # Se mantiene limpio para evitar código muerto.
 
     def stop(self):
         self.is_running = False
@@ -240,23 +266,16 @@ class BotManager:
                 row = df_full.iloc[i]
                 atr_val = row["ATRr_14"] if row["ATRr_14"] > 0 else 1.0
 
-                # Construcción rápida de features para testear
-                feat_hour = row.name.hour  # Simplificación para búsqueda rápida
-
-                features = pd.DataFrame(
-                    [
-                        {
-                            "hour": feat_hour,
-                            "is_ny_session": 1 if (9 <= feat_hour < 16) else 0,
-                            "distance_to_ema50": (signal["entry_price"] - row["ema_50"])
-                            / atr_val,
-                            "trend_ema200": 1
-                            if signal["entry_price"] > row["ema_200"]
-                            else 0,
-                            "volatility_shock": (row["high"] - row["low"]) / atr_val,
-                        }
-                    ]
-                )
+                # Construcción CORRECTA de features usando la librería centralizada
+                if build_features:
+                    market_ctx = {
+                        'atr': row.get('ATRr_14', 1.0),
+                        'ema_50': row.get('ema_50', 0.0),
+                        'ema_200': row.get('ema_200', 0.0)
+                    }
+                    features = build_features(row, signal['entry_price'], market_ctx)
+                else: 
+                     features = None
 
                 # Preguntar a la IA
                 if self.model:
@@ -310,8 +329,13 @@ class BotManager:
                 )
                 await asyncio.sleep(2)
 
-                if self.model:
-                    features = self._prepare_features_for_ai(signal, current_slice)
+                if self.model and build_features:
+                    market_ctx = {
+                        'atr': row.get('ATRr_14', 1.0),
+                        'ema_50': row.get('ema_50', 0.0),
+                        'ema_200': row.get('ema_200', 0.0)
+                    }
+                    features = build_features(row, signal['entry_price'], market_ctx)
                     prob = self.model.predict_proba(features)[0][1]
 
                     self.log(f"🤖 Consultando IA... Probabilidad: {prob:.2%}")

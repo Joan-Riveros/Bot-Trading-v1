@@ -5,6 +5,8 @@ import asyncio
 import uvicorn
 import os
 import sys
+from pydantic import BaseModel
+from typing import Optional
 
 # Importar nuestro Cerebro Real (No simulación)
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -45,6 +47,15 @@ def root():
     }
 
 
+# --- Modelos Pydantic ---
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+class SettingsRequest(BaseModel):
+    risk: float
+    auto_trade: bool
+
 # --- Endpoints de Control ---
 
 
@@ -68,6 +79,20 @@ def panic():
     bot.panic()  # Cierra posiciones en MT5 de verdad
     return {"status": "panic_executed", "message": "PROTOCOLO DE PÁNICO EJECUTADO"}
 
+# --- Endpoint Auth ---
+@app.post("/auth/login")
+def login(req: LoginRequest):
+    # Mock Auth para MVP
+    if req.username == "admin" and req.password == "123":
+        return {"token": "demo-token-xyz-999", "valid": True}
+    return {"token": None, "valid": False}
+
+# --- Settings ---
+@app.post("/settings")
+def update_settings(req: SettingsRequest):
+    bot.update_settings(req.risk, req.auto_trade)
+    return {"status": "ok", "settings": bot.get_settings()}
+
 
 # --- WebSocket para Flutter ---
 @app.websocket("/ws")
@@ -76,10 +101,18 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             # Enviamos datos reales a la App
+            # Enviamos datos reales a la App
+            # Payload enriquecido para Dashboard Móvil
+            financials = bot.get_balance_equity()
+            config = bot.get_settings()
+            
             data = {
                 "running": bot.is_running,
-                "logs": bot.logs[-15:],  # Enviamos lista para la consola
                 "status_text": bot.latest_status,
+                "logs": bot.logs[-15:],
+                "account": financials,       # {balance, equity}
+                "settings": config,          # {risk, auto_trade}
+                "recent_trades": bot.trade_history[-5:] # Últimos 5
             }
             await websocket.send_json(data)
             await asyncio.sleep(1)

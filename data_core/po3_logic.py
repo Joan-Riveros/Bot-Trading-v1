@@ -1,132 +1,160 @@
 import pandas as pd
 import numpy as np
 
-
 class PO3Detector:
     """
-    v2.0 - Motor de Lógica Secuencial (State-Aware)
-    Implementa la validación estricta:
-    1. Liquidity Raid (Sweep) contra niveles 'target_liquidity' proyectados.
-    2. Displacement (Cierre fuerte lejos de la zona).
-    3. FVG Creation (Confirmación de inyección de volumen).
+    v3.0 - Motor PO3 Institucional + SMT Divergence
     """
 
-    def __init__(self, df: pd.DataFrame):
+    def __init__(self, df: pd.DataFrame, df_correlated: pd.DataFrame = None):
         self.df = df
+        self.df_corr = df_correlated # Data del ES (S&P 500)
 
     def scan_for_signals(self, i: int):
-        """
-        Escanea la vela en el índice 'i' buscando la FINALIZACIÓN del patrón PO3.
-        Retorna dict con trade setup o None.
-        """
-        # Margen de seguridad para cálculos previos
-        if i < 20:
-            return None
+        if i < 20: return None
 
         row = self.df.iloc[i]
 
-        # --- PASO 1: ¿Tenemos un FVG (Gatillo) en la vela actual? ---
-        # El FVG es la última pieza del dominó. Si no está, no procesamos nada.
+        # 1. FVG Trigger
         fvg_type, fvg_price = self._detect_dynamic_fvg(i)
+        if not fvg_type: return None
 
-        if not fvg_type:
-            return None
-
-        # --- PASO 2: Validación de Contexto (El Sweep) ---
-        # Si tenemos un FVG Bajista, significa que queremos vender.
-        # Para vender, PRIMERO debimos haber capturado liquidez de compra (Highs).
-
-        # Miramos una ventana corta hacia atrás (ej. 5 velas).
-        # La manipulación debe ser reciente para ser válida.
+        # 2. Sweep & SMT Validation
         scan_window = 5
         sweep_detected = False
+        smt_confirmed = False # Nueva variable de control
         stop_loss_level = 0.0
 
         if fvg_type == "BEARISH":
-            # Lógica: En las últimas X velas, ¿hubo alguna cuyo High superó
-            # la liquidez objetivo (Target High) que existía en ese momento?
-
-            # Recortamos la ventana de análisis
+            # --- BUSCAR SWEEP EN NQ ---
             window_df = self.df.iloc[i - scan_window : i]
-
-            # Buscamos el Sweep
-            # Condición: High de la vela > Target Liquidity High de esa misma vela
+            # ¿Superamos un High previo?
             sweeps = window_df[window_df["high"] > window_df["target_liquidity_high"]]
 
             if not sweeps.empty:
-                # Validamos calidad del Sweep:
-                # El precio máximo alcanzado en la ventana es nuestro punto de invalidación
                 highest_point = window_df["high"].max()
-
-                # Check de Desplazamiento:
-                # El precio actual (que cerró el FVG) debe estar DEBAJO del nivel barrido.
-                # Si estamos por encima, no es un rechazo, es una ruptura.
-                current_close = row["close"]
-
-                # Obtenemos el nivel que se rompió (del primer sweep detectado)
                 level_broken = sweeps.iloc[0]["target_liquidity_high"]
-
-                if current_close < level_broken:
+                
+                # Validación de Desplazamiento (Cierre abajo del nivel roto)
+                if row["close"] < level_broken:
                     sweep_detected = True
                     stop_loss_level = highest_point
+                    
+                    # --- VALIDACIÓN SMT (EL SANTO GRIAL) ---
+                    # Si NQ hizo un High mas alto, ¿Qué hizo el ES?
+                    if self._check_smt_divergence(i, scan_window, "BEARISH"):
+                        smt_confirmed = True
+                    else:
+                        # Si no hay data de ES, asumimos True para no bloquear (o False si quieres ser estricto)
+                        smt_confirmed = True if self.df_corr is None else False
 
         elif fvg_type == "BULLISH":
-            # Lógica inversa: Buscamos toma de liquidez de venta (Lows)
+            # --- BUSCAR SWEEP EN NQ ---
             window_df = self.df.iloc[i - scan_window : i]
-
             sweeps = window_df[window_df["low"] < window_df["target_liquidity_low"]]
 
             if not sweeps.empty:
                 lowest_point = window_df["low"].min()
-                current_close = row["close"]
                 level_broken = sweeps.iloc[0]["target_liquidity_low"]
 
-                if current_close > level_broken:
+                if row["close"] > level_broken:
                     sweep_detected = True
                     stop_loss_level = lowest_point
+                    
+                    # --- VALIDACIÓN SMT ---
+                    if self._check_smt_divergence(i, scan_window, "BULLISH"):
+                        smt_confirmed = True
+                    else:
+                        smt_confirmed = True if self.df_corr is None else False
 
-        if not sweep_detected:
-            return None
-
-        # --- PASO 3: Construcción de la Señal ---
+        # FILTRO FINAL: Solo pasamos si hay Sweep Y (SMT o no hay data correlacionada)
+        if not sweep_detected: return None
+        
+        # Opcional: Puedes decidir si retornar None si smt_confirmed es False
+        # Para v1, lo marcaremos en el objeto de retorno para que la IA lo sepa
+        
         return {
             "timestamp": str(row.name),
-            "signal_type": fvg_type,  # BULLISH / BEARISH
-            "entry_price": fvg_price,  # Límite de entrada
-            "stop_loss": stop_loss_level,  # Protección estructural
+            "signal_type": fvg_type,
+            "entry_price": fvg_price,
+            "stop_loss": stop_loss_level,
             "take_profit": self._calculate_tp(fvg_price, stop_loss_level, fvg_type),
-            "atr_context": row["ATRr_14"],  # Para fines de registro/debug
+            "atr_context": row["ATRr_14"],
+            "smt_divergence": smt_confirmed # Nueva etiqueta valiosa
         }
 
+    def _check_smt_divergence(self, idx, window, direction):
+        """
+        Compara la estructura del NQ con el ES.
+        Retorna True si hay Divergencia (SMT).
+        """
+        if self.df_corr is None: return False
+        
+        # Sincronización temporal: Obtener índices de tiempo
+        try:
+            current_time = self.df.index[idx]
+            start_time = self.df.index[idx - window]
+            
+            # Recortar ventana en el Activo Correlacionado (ES)
+            # Usamos búsqueda asof o slice directo si los indices coinciden
+            es_window = self.df_corr.loc[start_time : current_time]
+            
+            if es_window.empty: return False
+            
+            # --- LÓGICA DE DIVERGENCIA ---
+            if direction == "BEARISH":
+                # NQ hizo Higher High (Ya validado fuera).
+                # SMT Bearish = ES hizo Lower High (Debilidad).
+                
+                # Obtenemos el máximo de ES en esta ventana
+                es_high_window = es_window['high'].max()
+                
+                # Obtenemos el target liquidity del ES (necesitamos que indicators.py haya procesado ES tambien)
+                # Si no tenemos target liquidity en ES, comparamos con el máximo de una ventana PREVIA
+                # Simplificación robusta: Comparar con el máximo de la ventana anterior a esta ventana
+                # Para MVP: Verificamos si el ES High de la ventana superó su propio fractal reciente
+                # Asumimos que df_corr tiene las columnas 'target_liquidity_high' calculadas
+                
+                if 'target_liquidity_high' in es_window.columns:
+                    # Si ES NO rompió su liquidez, es divergencia.
+                    # NQ rompió (Fuerza/Manipulación), ES no rompió (Debilidad real).
+                    broken_liquidity = es_window[es_window['high'] > es_window['target_liquidity_high']]
+                    
+                    if broken_liquidity.empty:
+                        return True # ¡SMT DETECTADO! ES no pudo hacer un alto más alto.
+                    else:
+                        return False # Correlación normal (ambos subieron).
+                        
+            elif direction == "BULLISH":
+                # NQ hizo Lower Low.
+                # SMT Bullish = ES hizo Higher Low (Fortaleza).
+                if 'target_liquidity_low' in es_window.columns:
+                    broken_liquidity = es_window[es_window['low'] < es_window['target_liquidity_low']]
+                    
+                    if broken_liquidity.empty:
+                        return True # ¡SMT DETECTADO! ES no quiso bajar.
+                    else:
+                        return False
+                        
+        except Exception as e:
+            # print(f"Error SMT check: {e}")
+            return False
+
+        return False
+
     def _detect_dynamic_fvg(self, idx: int):
-        """
-        Detecta FVG usando ATR como filtro de ruido.
-        """
-        c0 = self.df.iloc[idx]  # Vela actual
-        c1 = self.df.iloc[idx - 1]  # Vela de desplazamiento
-        c2 = self.df.iloc[idx - 2]  # Vela origen
-
+        c0 = self.df.iloc[idx]; c1 = self.df.iloc[idx - 1]; c2 = self.df.iloc[idx - 2]
         atr = c0["ATRr_14"]
-        min_gap_size = 0.5 * atr  # El gap debe ser al menos medio ATR (Significancia)
-
-        # FVG BAJISTA (Gap entre c2.Low y c0.High)
-        if c2["low"] > c0["high"]:
-            gap = c2["low"] - c0["high"]
-            if gap >= min_gap_size:
-                return "BEARISH", c2["low"]  # Entrada en el inicio del gap
-
-        # FVG ALCISTA (Gap entre c2.High y c0.Low)
-        if c2["high"] < c0["low"]:
-            gap = c0["low"] - c2["high"]
-            if gap >= min_gap_size:
-                return "BULLISH", c2["high"]
-
+        min_gap = 0.5 * atr
+        
+        if c2["low"] > c0["high"]: # Bearish
+            if (c2["low"] - c0["high"]) >= min_gap: return "BEARISH", c2["low"]
+            
+        if c2["high"] < c0["low"]: # Bullish
+            if (c0["low"] - c2["high"]) >= min_gap: return "BULLISH", c2["high"]
+            
         return None, 0.0
 
     def _calculate_tp(self, entry, sl, direction):
-        """Calcula TP fijo 2R para el dataset inicial"""
         risk = abs(entry - sl)
-        if direction == "BULLISH":
-            return entry + (risk * 2)
-        else:
-            return entry - (risk * 2)
+        return entry + (risk * 2) if direction == "BULLISH" else entry - (risk * 2)
