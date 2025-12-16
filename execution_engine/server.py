@@ -5,16 +5,16 @@ import asyncio
 import uvicorn
 import os
 import sys
+import json  # <--- NUEVO: Necesario para leer el reporte de backtest
 from pydantic import BaseModel
 from typing import Optional
 
-# Importar nuestro Cerebro Real (No simulación)
+# Importar nuestro Cerebro Real
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from execution_engine.bot_manager import BotManager
 
-# Instancia Global del Bot (El que tiene la IA y MT5)
+# Instancia Global del Bot
 bot = BotManager()
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -23,7 +23,6 @@ async def lifespan(app: FastAPI):
     print("🔌 SERVIDOR API: APAGADO")
     if bot.is_running:
         bot.stop()
-
 
 app = FastAPI(lifespan=lifespan, title="Institutional PO3 Sniper")
 
@@ -36,16 +35,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 @app.get("/")
 def root():
-    # Mostramos el umbral real cargado del modelo JSON
     return {
         "status": "Online",
         "system": "PO3 Sniper Real",
         "ai_threshold": f"{bot.threshold:.2%}",
     }
-
 
 # --- Modelos Pydantic ---
 class LoginRequest(BaseModel):
@@ -58,21 +54,17 @@ class SettingsRequest(BaseModel):
 
 # --- Endpoints de Control ---
 
-
 @app.post("/bot/start")
 async def start():
     if not bot.is_running:
-        # Esto arranca el bucle REAL en bot_manager.py
         asyncio.create_task(bot.start_loop())
         return {"status": "started", "message": "Motor de Trading Iniciado"}
     return {"status": "already_running", "message": "El motor ya está rugiendo"}
-
 
 @app.post("/bot/stop")
 def stop():
     bot.stop()
     return {"status": "stopped", "message": "Motor Detenido"}
-
 
 @app.post("/bot/panic")
 def panic():
@@ -90,37 +82,36 @@ def login(req: LoginRequest):
 # --- Settings ---
 @app.post("/settings")
 def update_settings(req: SettingsRequest):
-    bot.update_settings(req.risk, req.auto_trade)
-    return {"status": "ok", "settings": bot.get_settings()}
+    # Asegúrate de que tu BotManager tenga este método implementado
+    # Si no lo tiene, agrégalo en bot_manager.py
+    if hasattr(bot, 'update_settings'):
+        bot.update_settings(req.risk, req.auto_trade)
+        return {"status": "ok", "settings": bot.get_settings()}
+    else:
+        # Fallback simple si el método no existe aún
+        return {"status": "error", "message": "Método update_settings no implementado en BotManager"}
 
+# --- NUEVO: ENDPOINT DE RESULTADOS (BACKTEST) ---
+# Este es el endpoint que consumirá Flutter para mostrar la gráfica de ventas
+@app.get("/api/backtest-results")
+def get_backtest_results():
+    """
+    Entrega el JSON generado por backtester.py para mostrar en la App.
+    """
+    file_path = "execution_engine/backtest_results.json"
+    
+    if os.path.exists(file_path):
+        with open(file_path, "r") as f:
+            data = json.load(f)
+        return data
+    else:
+        # Mock si no hay datos aún (para que el frontend no falle)
+        return {
+            "summary": {"total_trades": 0, "win_rate": 0, "net_profit": 0},
+            "recent_trades": []
+        }
 
-# --- WebSocket para Flutter ---
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    try:
-        while True:
-            # Enviamos datos reales a la App
-            # Enviamos datos reales a la App
-            # Payload enriquecido para Dashboard Móvil
-            financials = bot.get_balance_equity()
-            config = bot.get_settings()
-            
-            data = {
-                "running": bot.is_running,
-                "status_text": bot.latest_status,
-                "logs": bot.logs[-15:],
-                "account": financials,       # {balance, equity}
-                "settings": config,          # {risk, auto_trade}
-                "recent_trades": bot.trade_history[-5:] # Últimos 5
-            }
-            await websocket.send_json(data)
-            await asyncio.sleep(1)
-    except WebSocketDisconnect:
-        print("📱 Cliente Flutter desconectado")
-
-
-# Simulacion
+# --- Simulacion ---
 @app.post("/bot/simulate")
 async def simulate():
     if not bot.is_running:
@@ -128,6 +119,29 @@ async def simulate():
         return {"status": "simulation_started", "message": "Modo Demo Iniciado"}
     return {"status": "error", "message": "Detén el bot antes de simular"}
 
+# --- WebSocket para Flutter ---
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        while True:
+            # Obtenemos datos del bot de manera segura
+            financials = getattr(bot, 'get_balance_equity', lambda: {"balance": 0, "equity": 0})()
+            config = getattr(bot, 'get_settings', lambda: {"risk": 1.0, "auto_trade": False})()
+            trades = getattr(bot, 'trade_history', [])
+
+            data = {
+                "running": bot.is_running,
+                "status_text": bot.latest_status,
+                "logs": bot.logs[-15:],
+                "account": financials,       # {balance, equity}
+                "settings": config,          # {risk, auto_trade}
+                "recent_trades": trades[-5:] # Últimos 5 trades en vivo
+            }
+            await websocket.send_json(data)
+            await asyncio.sleep(1)
+    except WebSocketDisconnect:
+        print("📱 Cliente Flutter desconectado")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
