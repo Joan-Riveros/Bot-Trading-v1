@@ -35,11 +35,11 @@ class BotManager:
         self.model = xgb.XGBClassifier()
         self.threshold = 0.70
         self.indicators = Indicators()
-        
+
         # --- NUEVO: Estado Extendido para App ---
         self.trade_history = []  # Lista de dicts: {price, type, profit, ...}
-        self.auto_trade = True   # Control maestro de ejecución
-        
+        self.auto_trade = True  # Control maestro de ejecución
+
         self._load_brain()
 
     # --- GETTERS & SETTERS (Interfaz App) ---
@@ -105,14 +105,16 @@ class BotManager:
                 if df is not None and len(df) > 100:
                     # 1.B. Obtención de datos ES (SMT Divergence)
                     # Necesitamos calcular indicadores también para ES (Fractales)
-                    df_es = self.driver.get_market_data(symbol=self.driver.symbol_es, n_candles=500)
-                    
+                    df_es = self.driver.get_market_data(
+                        symbol=self.driver.symbol_es, n_candles=500
+                    )
+
                     if df_es is not None and len(df_es) > 100:
-                         df_es = self.indicators.add_all_features(df_es)
-                    
+                        df_es = self.indicators.add_all_features(df_es)
+
                     # 2. INDICADORES (NQ)
                     df = self.indicators.add_all_features(df)
-                    
+
                     # 3. LÓGICA PO3 (Con SMT)
                     last_idx = len(df) - 2  # Vela confirmada
                     # Pasamos df_es al detector para que valide divergencias
@@ -138,15 +140,17 @@ class BotManager:
                             # Contexto de mercado para feature engineering
                             # Usamos la fila donde ocurrió la señal (last_idx)
                             row_signal = df.iloc[last_idx]
-                            
+
                             market_ctx = {
-                                'atr': row_signal.get('ATRr_14', 1.0),
-                                'ema_50': row_signal.get('ema_50', 0.0),
-                                'ema_200': row_signal.get('ema_200', 0.0)
+                                "atr": row_signal.get("ATRr_14", 1.0),
+                                "ema_50": row_signal.get("ema_50", 0.0),
+                                "ema_200": row_signal.get("ema_200", 0.0),
                             }
-                            
-                            features = build_features(row_signal, signal['entry_price'], market_ctx)
-                            
+
+                            features = build_features(
+                                row_signal, signal["entry_price"], market_ctx
+                            )
+
                             try:
                                 prob = self.model.predict_proba(features)[0][1]
                                 if prob >= self.threshold:
@@ -163,8 +167,11 @@ class BotManager:
                                 should_trade = False
                         else:
                             # Sin IA o sin módulo features, operamos la señal pura (Fallback)
-                            if not self.model: self.log("⚠ Operando sin IA (Modelo no cargado).")
-                            should_trade = True if signal['smt_divergence'] else False # Solo operamos si hay SMT confirmado
+                            if not self.model:
+                                self.log("⚠ Operando sin IA (Modelo no cargado).")
+                            should_trade = (
+                                True if signal["smt_divergence"] else False
+                            )  # Solo operamos si hay SMT confirmado
 
                         # 5. EJECUCIÓN (Respetando AutoTrade)
                         if should_trade and self.auto_trade:
@@ -178,13 +185,15 @@ class BotManager:
                             if order:
                                 self.log(f"🎫 Orden Ticket: {order}")
                                 # Registrar en historial (Mock inicial, lo ideal es leer desde MT5)
-                                self.trade_history.append({
-                                    "ticket": order,
-                                    "symbol": self.driver.symbol,
-                                    "type": signal["signal_type"],
-                                    "price": signal["entry_price"],
-                                    "time": str(datetime.now())
-                                })
+                                self.trade_history.append(
+                                    {
+                                        "ticket": order,
+                                        "symbol": self.driver.symbol,
+                                        "type": signal["signal_type"],
+                                        "price": signal["entry_price"],
+                                        "time": str(datetime.now()),
+                                    }
+                                )
                                 await asyncio.sleep(60)  # Cooldown
 
             except Exception as e:
@@ -269,13 +278,13 @@ class BotManager:
                 # Construcción CORRECTA de features usando la librería centralizada
                 if build_features:
                     market_ctx = {
-                        'atr': row.get('ATRr_14', 1.0),
-                        'ema_50': row.get('ema_50', 0.0),
-                        'ema_200': row.get('ema_200', 0.0)
+                        "atr": row.get("ATRr_14", 1.0),
+                        "ema_50": row.get("ema_50", 0.0),
+                        "ema_200": row.get("ema_200", 0.0),
                     }
-                    features = build_features(row, signal['entry_price'], market_ctx)
-                else: 
-                     features = None
+                    features = build_features(row, signal["entry_price"], market_ctx)
+                else:
+                    features = None
 
                 # Preguntar a la IA
                 if self.model:
@@ -331,17 +340,18 @@ class BotManager:
 
                 if self.model and build_features:
                     market_ctx = {
-                        'atr': row.get('ATRr_14', 1.0),
-                        'ema_50': row.get('ema_50', 0.0),
-                        'ema_200': row.get('ema_200', 0.0)
+                        "atr": row.get("ATRr_14", 1.0),
+                        "ema_50": row.get("ema_50", 0.0),
+                        "ema_200": row.get("ema_200", 0.0),
                     }
-                    features = build_features(row, signal['entry_price'], market_ctx)
+                    features = build_features(row, signal["entry_price"], market_ctx)
                     prob = self.model.predict_proba(features)[0][1]
 
                     self.log(f"🤖 Consultando IA... Probabilidad: {prob:.2%}")
                     await asyncio.sleep(2)
+                    demo_threshold = 0.60
 
-                    if prob >= self.threshold:
+                    if prob >= demo_threshold:
                         self.log(
                             f"✅ IA APROBADO ({prob:.1%}). EJECUTANDO ORDEN SIMULADA..."
                         )

@@ -1,0 +1,152 @@
+{
+    "summary": {
+        "total_trades": 124,
+        "wins": 112,
+        "losses": 9,
+        "win_rate": 90.32,
+        "final_balance": 31500.0,
+        "net_profit": 21500.0
+    },
+    "recent_trades": [
+        {
+            "time": "2025-12-02 01:00:00+00:00",
+            "type": "BULLISH",
+            "prob": 82.98,
+            "pnl": 200.0,
+            "result": "WIN"
+        },
+        {
+            "time": "2025-12-02 01:01:00+00:00",
+            "type": "BULLISH",
+            "prob": 83.05,
+            "pnl": 200.0,
+            "result": "WIN"
+        },
+        {
+            "time": "2025-12-02 01:09:00+00:00",
+            "type": "BEARISH",
+            "prob": 80.35,
+            "pnl": -100.0,
+            "result": "LOSS"
+        },
+        {
+            "time": "2025-12-02 13:35:00+00:00",
+            "type": "BEARISH",
+            "prob": 80.26,
+            "pnl": 200.0,
+            "result": "WIN"
+        },
+        {
+            "time": "2025-12-02 16:36:00+00:00",
+            "type": "BULLISH",
+            "prob": 81.32,
+            "pnl": 200.0,
+            "result": "WIN"
+        },
+        {
+            "time": "2025-12-03 06:57:00+00:00",
+            "type": "BEARISH",
+            "prob": 82.3,
+            "pnl": -100.0,
+            "result": "LOSS"
+        },
+        {
+            "time": "2025-12-04 12:31:00+00:00",
+            "type": "BEARISH",
+            "prob": 81.54,
+            "pnl": 200.0,
+            "result": "WIN"
+        },
+        {
+            "time": "2025-12-05 03:01:00+00:00",
+            "type": "BULLISH",
+            "prob": 80.78,
+            "pnl": 200.0,
+            "result": "WIN"
+        },
+        {
+            "time": "2025-12-09 12:40:00+00:00",
+            "type": "BEARISH",
+            "prob": 85.95,
+            "pnl": 200.0,
+            "result": "WIN"
+        },
+        {
+            "time": "2025-12-09 17:47:00+00:00",
+            "type": "BEARISH",
+            "prob": 82.87,
+            "pnl": 200.0,
+            "result": "WIN"
+        },
+        {
+            "time": "2025-12-10 01:00:00+00:00",
+            "type": "BULLISH",
+            "prob": 80.44,
+            "pnl": 200.0,
+            "result": "WIN"
+        },
+        {
+            "time": "2025-12-10 03:08:00+00:00",
+            "type": "BEARISH",
+            "prob": 82.76,
+            "pnl": 200.0,
+            "result": "WIN"
+        },
+        {
+            "time": "2025-12-10 04:19:00+00:00",
+            "type": "BULLISH",
+            "prob": 81.85,
+            "pnl": 200.0,
+            "result": "WIN"
+        },
+        {
+            "time": "2025-12-10 21:41:00+00:00",
+            "type": "BEARISH",
+            "prob": 80.95,
+            "pnl": -100.0,
+            "result": "LOSS"
+        },
+        {
+            "time": "2025-12-11 10:02:00+00:00",
+            "type": "BEARISH",
+            "prob": 80.68,
+            "pnl": 200.0,
+            "result": "WIN"
+        },
+        {
+            "time": "2025-12-12 16:42:00+00:00",
+            "type": "BEARISH",
+            "prob": 81.33,
+            "pnl": 200.0,
+            "result": "WIN"
+        },
+        {
+            "time": "2025-12-15 02:27:00+00:00",
+            "type": "BULLISH",
+            "prob": 80.08,
+            "pnl": 200.0,
+            "result": "WIN"
+        },
+        {
+            "time": "2025-12-15 07:56:00+00:00",
+            "type": "BULLISH",
+            "prob": 80.17,
+            "pnl": 200.0,
+            "result": "WIN"
+        },
+        {
+            "time": "2025-12-15 16:29:00+00:00",
+            "type": "BULLISH",
+            "prob": 81.04,
+            "pnl": -100.0,
+            "result": "LOSS"
+        },
+        {
+            "time": "2025-12-16 01:26:00+00:00",
+            "type": "BEARISH",
+            "prob": 82.22,
+            "pnl": 200.0,
+            "result": "WIN"
+        }
+    ]
+}
