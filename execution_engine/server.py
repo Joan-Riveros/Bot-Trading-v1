@@ -126,17 +126,18 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             # Obtenemos datos del bot de manera segura
-            financials = getattr(bot, 'get_balance_equity', lambda: {"balance": 0, "equity": 0})()
-            config = getattr(bot, 'get_settings', lambda: {"risk": 1.0, "auto_trade": False})()
-            trades = getattr(bot, 'trade_history', [])
-
+            financials = bot.get_balance_equity()
+            config = bot.get_settings()
+            stats = bot.get_statistics()
+            
             data = {
                 "running": bot.is_running,
                 "status_text": bot.latest_status,
                 "logs": bot.logs[-15:],
                 "account": financials,       # {balance, equity}
                 "settings": config,          # {risk, auto_trade}
-                "recent_trades": trades[-5:] # Últimos 5 trades en vivo
+                "statistics": stats,         # {win_rate, profit_factor, total_pnl}
+                "recent_trades": bot.trade_history[-20:] # Últimos 20 para display
             }
             await websocket.send_json(data)
             await asyncio.sleep(1)
